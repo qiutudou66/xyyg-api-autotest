@@ -1,0 +1,27 @@
+# 手机号校验数据：同一组边界值，改 YAML 就能增删，不用改测试代码
+cases:
+  - id: valid_139
+    phone: "13900000098"
+    success: true
+  - id: valid_138
+    phone: "13900000099"
+    success: true
+  - id: too_short
+    phone: "1380000000"
+    success: false
+  - id: too_long
+    phone: "138000000044"
+    success: false
+  - id: bad_prefix
+    phone: "12800000004"
+    success: false
+  - id: contains_letter
+    phone: "1380000000a"
+    success: false
+  - id: empty
+    phone: ""
+    success: false
+  # 回归用例：正则已修正为 5[0-35-9]，逗号不再是合法字符
+  - id: comma_in_phone
+    phone: "15,00000000"
+    success: false

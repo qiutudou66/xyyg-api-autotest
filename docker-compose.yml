@@ -1,0 +1,62 @@
+# 本地一键起被测系统依赖的中间件（MySQL / Redis / RabbitMQ）。
+# 注意：本机当前没有装 Docker，这个文件未在本机实测；
+# CI 里用的是 .github/workflows/ci.yml 中等价的 GitHub Actions service 配置。
+#
+# 用法：
+#   docker compose up -d
+#   # 首次启动后导入初始化数据（SQL 在被测系统仓库里）
+#   docker exec -i hmdp-mysql mysql -uroot -p123456 hmdp \
+#     < ../hm-dianping/src/main/resources/db/hmdp.sql
+#
+# 想重新初始化：docker compose down -v
+
+name: hmdp-autotest
+
+services:
+  mysql:
+    image: mysql:5.7
+    container_name: hmdp-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: "123456"
+      MYSQL_DATABASE: "hmdp"
+    ports:
+      - "3306:3306"
+    volumes:
+      - hmdp-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1", "-uroot", "-p123456"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7
+    container_name: hmdp-redis
+    command: ["redis-server", "--requirepass", "123456"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "123456", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: hmdp-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: "guest"
+      RABBITMQ_DEFAULT_PASS: "guest"
+      # guest 默认只允许 localhost 登录；容器外连进来要放开 loopback
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbit loopback_users []"
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+volumes:
+  hmdp-mysql-data:

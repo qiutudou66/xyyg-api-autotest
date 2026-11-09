@@ -1,0 +1,149 @@
+name: API 自动化测试
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # 每天北京时间 02:17 跑全量（UTC 18:17）
+    - cron: "17 18 * * *"
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "执行范围"
+        type: choice
+        options: [smoke, full]
+        default: full
+
+env:
+  PYTHON_VERSION: "3.12"
+  # 被测系统仓库；CI 里 clone 最新 master 后构建启动
+  BACKEND_REPO: "https://github.com/qiutudou66/campus-yougou.git"
+  BASE_URL: "http://127.0.0.1:8081"
+  REDIS_HOST: "127.0.0.1"
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: "123456"
+  MYSQL_HOST: "127.0.0.1"
+  MYSQL_PORT: "3306"
+  MYSQL_USER: "root"
+  MYSQL_PASSWORD: "123456"
+  MYSQL_DB: "hmdp"
+  IMAGE_UPLOAD_DIR: "/tmp/hmdp-imgs"
+  TEST_TEMP_DIR: "/tmp/hmdp-autotest"
+
+jobs:
+  api-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      mysql:
+        image: mysql:5.7
+        env:
+          MYSQL_ROOT_PASSWORD: "123456"
+          MYSQL_DATABASE: "hmdp"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h127.0.0.1 -uroot -p123456"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=20
+
+      rabbitmq:
+        image: rabbitmq:3.13
+        env:
+          RABBITMQ_DEFAULT_USER: "guest"
+          RABBITMQ_DEFAULT_PASS: "guest"
+          # guest 默认只允许 localhost 登录；容器外连进来要放开 loopback
+          RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbit loopback_users []"
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd="rabbitmq-diagnostics -q ping"
+          --health-interval=10s
+          --health-timeout=10s
+          --health-retries=12
+
+    steps:
+      - name: 拉取测试代码
+        uses: actions/checkout@v4
+
+      - name: 启动 Redis（需要密码，service container 传不了启动参数）
+        run: |
+          docker run -d --name redis -p 6379:6379 redis:7 redis-server --requirepass "$REDIS_PASSWORD"
+          for i in $(seq 1 30); do
+            docker exec redis redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG && break
+            sleep 1
+          done
+          docker exec redis redis-cli -a "$REDIS_PASSWORD" ping
+
+      - name: 拉取被测系统
+        run: git clone --depth 1 "$BACKEND_REPO" backend
+
+      - name: 导入初始化数据
+        run: |
+          docker exec -i "${{ job.services.mysql.id }}" \
+            mysql -uroot -p"$MYSQL_PASSWORD" "$MYSQL_DB" \
+            < backend/src/main/resources/db/hmdp.sql
+          docker exec -i "${{ job.services.mysql.id }}" \
+            mysql -uroot -p"$MYSQL_PASSWORD" "$MYSQL_DB" -e "SELECT COUNT(*) AS users FROM tb_user;"
+
+      - name: 安装 JDK 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "8"
+
+      - name: 构建并启动被测系统
+        env:
+          REDIS_HOST: "127.0.0.1"
+          RABBITMQ_HOST: "127.0.0.1"
+        run: |
+          mkdir -p "$IMAGE_UPLOAD_DIR"
+          cd backend
+          mvn -q -DskipTests package
+          JAR=$(ls target/*.jar | grep -v original | head -1)
+          echo "jar: $JAR"
+          nohup java -jar "$JAR" > /tmp/backend.log 2>&1 &
+          echo $! > /tmp/backend.pid
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8081/shop-type/list > /dev/null; then
+              echo "后端已就绪"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "后端启动超时，日志如下："
+          cat /tmp/backend.log
+          exit 1
+
+      - name: 安装 Python 依赖
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: 冒烟测试
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        run: pytest -m smoke
+
+      - name: 全量测试
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: pytest
+
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-report
+          path: |
+            reports/report.html
+            reports/allure-results
+          retention-days: 14
+
+      - name: 失败时输出后端日志
+        if: failure()
+        run: tail -200 /tmp/backend.log
