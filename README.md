@@ -1,6 +1,6 @@
 # 校园优购 · 接口自动化测试
 
-[![API 自动化测试](https://github.com/qiutudou66/hmdp-api-autotest/actions/workflows/ci.yml/badge.svg)](https://github.com/qiutudou66/hmdp-api-autotest/actions/workflows/ci.yml)
+[![API 自动化测试](https://github.com/qiutudou66/xyyg-api-autotest/actions/workflows/ci.yml/badge.svg)](https://github.com/qiutudou66/xyyg-api-autotest/actions/workflows/ci.yml)
 
 被测系统：[campus-yougou](https://github.com/qiutudou66/campus-yougou)（Spring Boot + MySQL + Redis + RabbitMQ）。
 
