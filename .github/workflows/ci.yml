@@ -38,19 +38,6 @@ jobs:
     timeout-minutes: 30
 
     services:
-      mysql:
-        image: mysql:5.7
-        env:
-          MYSQL_ROOT_PASSWORD: "123456"
-          MYSQL_DATABASE: "hmdp"
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h127.0.0.1 -uroot -p123456"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=20
-
       rabbitmq:
         image: rabbitmq:3.13
         env:
@@ -79,6 +66,26 @@ jobs:
           done
           docker exec redis redis-cli -a "$REDIS_PASSWORD" ping
 
+      - name: 启动 MySQL（强制 utf8mb4）
+        run: |
+          # MySQL 5.7 默认字符集是 latin1，会让中文变 ? 并导致初始化数据插入失败
+          docker run -d --name mysql -p 3306:3306 \
+            -e MYSQL_ROOT_PASSWORD="$MYSQL_PASSWORD" \
+            -e MYSQL_DATABASE="$MYSQL_DB" \
+            mysql:5.7 \
+            --character-set-server=utf8mb4 \
+            --collation-server=utf8mb4_unicode_ci
+          for i in $(seq 1 60); do
+            if docker exec mysql mysqladmin ping -h127.0.0.1 -uroot -p"$MYSQL_PASSWORD" --silent 2>/dev/null; then
+              echo "MySQL 已就绪"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MySQL 启动超时"
+          docker logs mysql | tail -50
+          exit 1
+
       - name: 拉取被测系统
         run: git clone --depth 1 "$BACKEND_REPO" backend
 
@@ -86,14 +93,19 @@ jobs:
         run: |
           # 初始化 SQL 里有 timestamp DEFAULT '0000-00-00 00:00:00'，
           # MySQL 5.7 默认 sql_mode 含 NO_ZERO_DATE，会报 1067，导入前必须放宽
-          docker exec -i "${{ job.services.mysql.id }}" \
+          docker exec -i mysql \
             mysql -uroot -p"$MYSQL_PASSWORD" \
             --default-character-set=utf8mb4 \
             --init-command="SET SESSION sql_mode='NO_ENGINE_SUBSTITUTION'" \
             "$MYSQL_DB" \
             < backend/src/main/resources/db/hmdp.sql
-          docker exec -i "${{ job.services.mysql.id }}" \
-            mysql -uroot -p"$MYSQL_PASSWORD" "$MYSQL_DB" -e "SELECT COUNT(*) AS users FROM tb_user;"
+          docker exec -i mysql \
+            mysql -uroot -p"$MYSQL_PASSWORD" "$MYSQL_DB" -e "
+              SELECT COUNT(*) AS users FROM tb_user;
+              SELECT COUNT(*) AS shops FROM tb_shop;
+              SELECT COUNT(*) AS vouchers FROM tb_voucher;
+              SELECT id, name FROM tb_shop WHERE id = 1;
+            "
 
       - name: 安装 JDK 8
         uses: actions/setup-java@v4
