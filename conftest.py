@@ -95,6 +95,22 @@ def clean_environment(db, r):
 
 
 @pytest.fixture(scope="session")
+def warm_shop_cache(api, db, clean_environment):
+    """给初始化数据里的 1 号店铺预热 Redis 缓存。
+
+    详情接口走「逻辑过期」方案：缓存未命中直接返回「店铺不存在」，不回查数据库。
+    本地开发时缓存早就被前端或手工请求预热过了，干净环境（CI）里没有，
+    所以这里主动 PUT 一次 —— update 事务提交后会把缓存写进 Redis。
+
+    带一个恒等字段是为了避开 MyBatis-Plus 的坑：只传 id 的 updateById 生成不出 SET 子句。
+    """
+    score = db.scalar("SELECT score FROM tb_shop WHERE id = 1")
+    assert score is not None, "初始化数据里没有 1 号店铺，检查 hmdp.sql 是否导入"
+    assert_success(api.put("/shop", json={"id": 1, "score": int(score)}))
+    return 1
+
+
+@pytest.fixture(scope="session")
 def users(api, r, clean_environment):
     # 显式依赖 clean_environment，保证「先清残留，再造用户」
     return UserFactory(api, r)

@@ -26,13 +26,16 @@ def _voucher_payload(shop_id, title, **overrides):
 @allure.feature(FEATURE)
 @allure.story("查询优惠券")
 @pytest.mark.smoke
-def test_list_vouchers_of_shop(voucher_api):
+def test_list_vouchers_of_shop(voucher_api, voucher_factory):
+    # 秒杀券自己造，不依赖开发库里手工加的 10 号券 —— 干净环境（CI）里只有初始化 SQL 的普通券
+    voucher_id, _ = voucher_factory(1, stock=100)
     data = assert_success(voucher_api.list_by_shop(1))
     assert data, "1 号店铺应该有优惠券"
     ids = {item["id"] for item in data}
-    assert 1 in ids and 10 in ids
+    assert 1 in ids, "初始化数据里的普通券应该出现在列表里"
+    assert voucher_id in ids, "新建的秒杀券应该出现在列表里"
 
-    seckill = next(item for item in data if item["id"] == 10)
+    seckill = next(item for item in data if item["id"] == voucher_id)
     assert seckill["type"] == 1
     assert seckill["stock"] == 100, "秒杀券应该带库存字段"
     assert seckill["beginTime"] and seckill["endTime"]

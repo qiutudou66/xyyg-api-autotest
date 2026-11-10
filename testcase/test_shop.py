@@ -58,8 +58,8 @@ def test_shop_types_cached_in_redis(shop_api, r):
 @allure.feature(FEATURE)
 @allure.story("店铺详情")
 @pytest.mark.smoke
-def test_get_existing_shop(shop_api):
-    data = assert_success(shop_api.get(1))
+def test_get_existing_shop(shop_api, warm_shop_cache):
+    data = assert_success(shop_api.get(warm_shop_cache))
     assert data["id"] == 1
     assert data["name"]
     assert data["typeId"] == 1

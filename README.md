@@ -120,4 +120,5 @@ hmdp-autotest/
 
 - **暂不支持并行执行**。`conftest.py` 里的造数 factory、`itertools.count` 计数器和会话级清理都依赖单进程状态，直接开 `pytest-xdist -n auto` 会让不同 worker 抢同一批测试数据。改造方向：每个 worker 分配独立手机号段、清理逻辑按前缀隔离。
 - **接口覆盖率 100% 不等于逻辑覆盖 100%**，未覆盖维度（越权、并发极限、MQ 丢消息、安全扫描等）列在覆盖矩阵文末。
+- **用例不能依赖开发库残留数据**。干净环境（CI）第一次跑通前踩过两个坑：详情接口的「逻辑过期」方案要求缓存预热，而本地 Redis 早被前端请求预热过；秒杀券 10 号是开发库里手工加的，初始化 SQL 里只有一张普通券。现在分别用 `warm_shop_cache` fixture（调一次 PUT 触发写缓存）和 `voucher_factory`（用例自己造券）消除，整套用例在空库 + 空 Redis 上可复现。
 - **docker-compose 未在本机验证**：开发机没有装 Docker，CI 用的是 GitHub Actions service containers 的等价配置。
