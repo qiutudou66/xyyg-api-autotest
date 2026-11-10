@@ -84,8 +84,13 @@ jobs:
 
       - name: 导入初始化数据
         run: |
+          # 初始化 SQL 里有 timestamp DEFAULT '0000-00-00 00:00:00'，
+          # MySQL 5.7 默认 sql_mode 含 NO_ZERO_DATE，会报 1067，导入前必须放宽
           docker exec -i "${{ job.services.mysql.id }}" \
-            mysql -uroot -p"$MYSQL_PASSWORD" "$MYSQL_DB" \
+            mysql -uroot -p"$MYSQL_PASSWORD" \
+            --default-character-set=utf8mb4 \
+            --init-command="SET SESSION sql_mode='NO_ENGINE_SUBSTITUTION'" \
+            "$MYSQL_DB" \
             < backend/src/main/resources/db/hmdp.sql
           docker exec -i "${{ job.services.mysql.id }}" \
             mysql -uroot -p"$MYSQL_PASSWORD" "$MYSQL_DB" -e "SELECT COUNT(*) AS users FROM tb_user;"
@@ -146,4 +151,6 @@ jobs:
 
       - name: 失败时输出后端日志
         if: failure()
-        run: tail -200 /tmp/backend.log
+        run: |
+          echo "=== backend.log ==="
+          tail -200 /tmp/backend.log 2>/dev/null || echo "后端日志不存在（失败发生在构建/启动之前）"
